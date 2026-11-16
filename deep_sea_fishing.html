@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>深海漁途</title>
+<style>
+:root{--ink:#12334a;--sea:#087eaa;--deep:#06476e;--foam:#dff8ff;--gold:#ffca58}
+*{box-sizing:border-box}body{margin:0;background:#082f49;color:var(--ink);font-family:system-ui,-apple-system,"Noto Sans TC",sans-serif}
+#game{max-width:1050px;margin:auto;min-height:100vh;background:linear-gradient(#b8edfa,#eafaff);padding:12px}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+h1{font-size:clamp(22px,4vw,32px);margin:4px 0;color:#06476e}
+.stats{display:flex;gap:8px;flex-wrap:wrap}.pill{background:#fff;border:2px solid #9ddded;border-radius:20px;padding:7px 12px;font-weight:800}
+#scene{position:relative;margin-top:10px;border:4px solid #fff;border-radius:18px;overflow:hidden;background:#0b8fbd;box-shadow:0 5px 0 #8acbdc}
+canvas{display:block;width:100%;height:auto;touch-action:none}
+#overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+#toast{background:#063b59eF;color:white;padding:10px 16px;border-radius:14px;font-weight:700;opacity:0;transition:opacity .2s}
+#panels{display:grid;grid-template-columns:1.15fr .85fr;gap:10px;margin-top:10px}
+.panel{background:#fff;border:2px solid #a9deea;border-radius:16px;padding:12px;box-shadow:0 3px 0 #91cbd9}
+h2{font-size:17px;margin:0 0 8px;color:#075273}
+p{margin:5px 0;line-height:1.45}.muted{color:#587786;font-size:13px}
+button{border:0;border-radius:12px;background:#087eaa;color:white;font-weight:800;padding:10px 12px;font-size:14px;cursor:pointer;box-shadow:0 3px 0 #055878}
+button:active{transform:translateY(2px);box-shadow:0 1px 0 #055878}button:disabled{opacity:.42;cursor:not-allowed}
+.actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}.secondary{background:#e4f7fc;color:#075273;box-shadow:0 3px 0 #acdce7}.gold{background:#edaa25;color:#3b2a00;box-shadow:0 3px 0 #bf8312}
+#shop{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.item{border:1px solid #c5e6ed;border-radius:12px;padding:8px;font-size:13px}.item b{display:block}.item button{width:100%;margin-top:6px}
+#catch{font-weight:800;color:#075273;min-height:24px}
+#controls{display:flex;gap:6px;align-items:center;justify-content:center;margin-top:8px}
+#controls button{min-width:48px}
+#log{max-height:100px;overflow:auto;font-size:12px;color:#527080}
+@media(max-width:680px){#panels{grid-template-columns:1fr}.panel{padding:10px}#shop{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<div id="game">
+<header><h1>🎣 深海漁途</h1><div class="stats"><span class="pill">💰 $<span id="money">120</span></span><span class="pill">🐟 <span id="count">0</span> 條魚</span><span class="pill">🚤 <span id="boatName">木製小船</span></span></div></header>
+<div id="scene"><canvas id="sea" width="900" height="430"></canvas><div id="overlay"><div id="toast"></div></div></div>
+<div id="controls">
+<button class="secondary" id="left">◀</button><button class="secondary" id="up">▲</button><button class="secondary" id="down">▼</button><button class="secondary" id="right">▶</button>
+<button class="gold" id="fishBtn">🎣 開始釣魚</button>
+</div>
+<div id="panels">
+<section class="panel">
+<h2>🌊 海域與魚獲</h2><p id="zone">岸邊淺海</p><p class="muted" id="zoneInfo">安全的淺海，適合新手練習。</p>
+<div class="actions"><button class="secondary" id="sellBtn">💰 出售所有魚獲</button><button class="secondary" id="dockBtn">⚓ 返回漁港</button></div>
+<p id="catch">準備好出海了嗎？</p>
+<p class="muted">移動：方向鍵 / WASD。靠近海域邊界可探索更遠的海域。到漁港出售魚獲及購買裝備。</p>
+<h2 style="margin-top:12px">📖 捕魚日誌</h2><div id="log">你的漁途即將開始……</div>
+</section>
+<section class="panel">
+<h2>🛠️ 漁港商店</h2><p class="muted">升級魚竿和船隻，前往更深、更遠的海域。</p><div id="shop"></div>
+</section>
+</div>
+</div>
+<script>
+(()=>{
+const canvas=document.getElementById('sea'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+let money=120,fishBag=[],rod=0,boat=0,capacity=5,sonar=0;
+let x=140,y=220,zone=0,catchBusy=false,atDock=true,log=[];
+const zones=[
+{name:'岸邊淺海',desc:'安全的淺海，適合新手練習。',need:0,color:'#20a9c8',fish:[['沙丁魚','🐟',8,1],['小丑魚','🐠',14,1],['小鯛魚','🐟',22,2]]},
+{name:'近海珊瑚區',desc:'珊瑚礁附近魚種更多，偶爾有章魚出沒。',need:1,color:'#138db4',fish:[['海鱸','🐟',55,2],['章魚','🐙',85,3],['鯖魚','🐟',42,2],['海龜','🐢',110,3]]},
+{name:'遠洋公海',desc:'離岸很遠，能遇到大型洄游魚。',need:2,color:'#08739e',fish:[['鬼頭刀','🐟',260,3],['黃鰭鮪魚','🐟',520,4],['旗魚','🗡️',780,5],['大海鰻','🐍',340,3]]},
+{name:'深海海溝',desc:'陽光難以照到的深海，稀有生物出沒。',need:3,color:'#07527d',fish:[['皇帶魚','🐉',2400,5],['大王烏賊','🦑',3600,6],['深海鮟鱇魚','🐡',1800,5],['巨型石斑','🐟',2900,6]]},
+{name:'神秘海域',desc:'傳說中的海域，只有最好的船才能抵達。',need:4,color:'#07375f',fish:[['月光龍魚','🐉',12000,7],['幻彩巨鯨','🐋',18000,8],['深淵帝王蟹','🦀',9500,7]]}
+];
+const rods=[{name:'入門魚竿',price:0,power:1},{name:'強韌魚竿',price:350,power:2},{name:'遠洋魚竿',price:1800,power:3},{name:'深海碳纖竿',price:6500,power:4},{name:'傳說釣竿',price:18000,power:6}];
+const boats=[{name:'木製小船',price:0,range:0,speed:1},{name:'動力漁船',price:900,range:1,speed:1.35},{name:'遠洋漁船',price:5200,range:2,speed:1.7},{name:'深海探索船',price:18000,range:3,speed:2},{name:'傳奇探險船',price:65000,range:4,speed:2.3}];
+function say(t){$('toast').textContent=t;$('toast').style.opacity=1;clearTimeout(say.timer);say.timer=setTimeout(()=>$('toast').style.opacity=0,1800)}
+function addLog(t){log.unshift(t);log=log.slice(0,8);$('log').innerHTML=log.map(v=>'• '+v).join('<br>')}
+function update(){
+$('money').textContent=money.toLocaleString();$('count').textContent=fishBag.length;$('boatName').textContent=boats[boat].name;
+$('zone').textContent='目前海域：'+zones[zone].name;$('zoneInfo').textContent=zones[zone].desc;
+$('sellBtn').disabled=fishBag.length===0||!atDock;$('fishBtn').disabled=catchBusy||fishBag.length>=capacity;
+renderShop();draw();
+}
+function renderShop(){
+const items=[];
+if(rod<rods.length-1){let n=rods[rod+1];items.push(`<div class="item"><b>🎣 ${n.name}</b>釣力提升<br>$${n.price.toLocaleString()}<button ${money<n.price?'disabled':''} onclick="buyRod()">購買魚竿</button></div>`)}
+if(boat<boats.length-1){let n=boats[boat+1];items.push(`<div class="item"><b>🚤 ${n.name}</b>可探索 ${zones[n.range].name}<br>$${n.price.toLocaleString()}<button ${money<n.price?'disabled':''} onclick="buyBoat()">購買船隻</button></div>`)}
+items.push(`<div class="item"><b>🧊 大型魚箱</b>容量 +5（目前 ${capacity}）<br>$${capacity*180}<button ${money<capacity*180?'disabled':''} onclick="buyBox()">擴充魚箱</button></div>`);
+items.push(`<div class="item"><b>📡 魚群聲納</b>提示附近魚群<br>$700<button ${sonar?'disabled':money<700?'disabled':''} onclick="buySonar()">購買聲納</button></div>`);
+$('shop').innerHTML=items.join('');
+}
+window.buyRod=()=>{let n=rods[rod+1];if(money>=n.price){money-=n.price;rod++;say('已升級：'+n.name);addLog('購買了'+n.name);update()}};
+window.buyBoat=()=>{let n=boats[boat+1];if(money>=n.price){money-=n.price;boat++;say('新船下水！');addLog('購買了'+n.name);update()}};
+window.buyBox=()=>{let p=capacity*180;if(money>=p){money-=p;capacity+=5;say('魚箱容量增加！');update()}};
+window.buySonar=()=>{if(money>=700&&!sonar){money-=700;sonar=1;say('聲納已啟用！');update()}};
+function sell(){if(!atDock){say('請先返回漁港才能出售魚獲');return}if(!fishBag.length)return;let total=fishBag.reduce((a,f)=>a+f.value,0);money+=total;addLog(`出售 ${fishBag.length} 條魚，獲得 $${total.toLocaleString()}`);fishBag=[];$('catch').textContent=`交易完成！收入 $${total.toLocaleString()}`;update()}
+$('sellBtn').onclick=sell;
+$('dockBtn').onclick=()=>{x=115;y=215;zone=0;atDock=true;say('已返回漁港');update()};
+function attemptZone(){let z=Math.min(4,Math.floor(Math.max(0,x-230)/145));if(z>boat){x=230+boat*145;say('船隻等級不足！需要更好的船');return}if(z!==zone){zone=z;atDock=false;say('抵達：'+zones[zone].name);addLog('探索新海域：'+zones[zone].name);update()}}
+function move(dx,dy){if(catchBusy)return;x=Math.max(55,Math.min(850,x+dx*boats[boat].speed*12));y=Math.max(55,Math.min(375,y+dy*boats[boat].speed*12));atDock=x<190&&zone===0;attemptZone();update()}
+const keys={};window.addEventListener('keydown',e=>{let k=e.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();keys[k]=true;if(k===' '||k==='enter')fish()});
+window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+setInterval(()=>{if(keys.arrowleft||keys.a)move(-1,0);else if(keys.arrowright||keys.d)move(1,0);if(keys.arrowup||keys.w)move(0,-1);else if(keys.arrowdown||keys.s)move(0,1)},130);
+[['left',-1,0],['right',1,0],['up',0,-1],['down',0,1]].forEach(([id,dx,dy])=>{let b=$(id);b.addEventListener('pointerdown',e=>{e.preventDefault();move(dx,dy)})});
+function fish(){
+if(catchBusy)return;if(fishBag.length>=capacity){say('魚箱滿了！先回港出售');return}
+if(boat===0&&zone>0){say('船隻無法到達這片海域');return}
+catchBusy=true;update();$('catch').textContent='魚竿有動靜……等待魚兒上鉤！';
+let wait=900+Math.random()*1200;
+setTimeout(()=>{
+let pool=zones[zone].fish;let f=pool[Math.floor(Math.random()*pool.length)];
+let power=rods[rod].power;let chance=Math.min(.98,.62+power*.07-f[3]*.045);
+if(Math.random()<chance){
+let size=(.65+Math.random()*1.1)*(1+power*.09);let value=Math.round(f[2]*size);
+let item={name:f[0],emoji:f[1],value,size:size.toFixed(1)};
+fishBag.push(item);$('catch').textContent=`成功釣到 ${f[1]} ${f[0]}！重量 ${item.size} kg，估值 $${value}`;
+addLog(`釣到 ${f[0]}（${item.size} kg），估值 $${value.toLocaleString()}`);say('釣到魚了！');
+}else{$('catch').textContent='魚兒掙脫了！升級魚竿會更容易成功。';say('哎呀，魚跑掉了！')}
+catchBusy=false;update();
+},wait);
+}
+$('fishBtn').onclick=fish;
+function draw(){
+let w=900,h=430;ctx.clearRect(0,0,w,h);
+let g=ctx.createLinearGradient(0,0,0,h);g.addColorStop(0,zones[zone].color);g.addColorStop(1,'#043c67');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+// waves
+for(let j=0;j<9;j++){ctx.beginPath();ctx.strokeStyle='rgba(220,250,255,.18)';ctx.lineWidth=2;for(let i=0;i<=900;i+=10){let yy=45+j*45+Math.sin(i*.025+j*1.7)*5; if(i===0)ctx.moveTo(i,yy);else ctx.lineTo(i,yy)}ctx.stroke()}
+for(let i=0;i<22;i++){let px=(i*137+50)%880,py=(i*71+25)%400;ctx.fillStyle='rgba(210,250,255,.16)';ctx.beginPath();ctx.arc(px,py,2+(i%3),0,Math.PI*2);ctx.fill()}
+if(zone===0){ctx.fillStyle='#d8c18b';ctx.fillRect(0,0,65,h);ctx.fillStyle='#9bc56b';ctx.fillRect(0,0,25,h);ctx.fillStyle='#fff';ctx.fillRect(65,0,5,h)}
+// distance zones
+ctx.fillStyle='rgba(0,30,60,.13)';for(let i=1;i<5;i++){ctx.fillRect(230+(i-1)*145,0,2,h);ctx.fillStyle='rgba(255,255,255,.65)';ctx.font='13px sans-serif';ctx.fillText(zones[i].name,240+(i-1)*145,25);ctx.fillStyle='rgba(0,30,60,.13)'}
+if(sonar){ctx.strokeStyle='rgba(255,238,120,.8)';ctx.beginPath();ctx.arc(x,y,70+Math.sin(Date.now()/250)*8,0,Math.PI*2);ctx.stroke()}
+ // boat
+ctx.save();ctx.translate(x,y);ctx.rotate(-.04);ctx.fillStyle='#68472e';ctx.beginPath();ctx.moveTo(-28,-15);ctx.lineTo(25,-13);ctx.lineTo(34,0);ctx.lineTo(22,17);ctx.lineTo(-25,15);ctx.closePath();ctx.fill();ctx.fillStyle='#f5e8c9';ctx.fillRect(-8,-11,20,22);ctx.fillStyle='#d84e42';ctx.fillRect(-4,-8,9,16);ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-2,-13);ctx.lineTo(-2,-35);ctx.stroke();ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(0,-33);ctx.lineTo(18,-17);ctx.lineTo(0,-17);ctx.fill();ctx.restore();
+ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';ctx.fillText('你的小船',x-28,y+40);
+if(atDock){ctx.fillStyle='#fff';ctx.font='bold 15px sans-serif';ctx.fillText('⚓ 漁港',75,35)}
+}
+$('dockBtn').addEventListener('click',()=>{atDock=true;});
+update();
+})();
+</script>
+</body></html>
